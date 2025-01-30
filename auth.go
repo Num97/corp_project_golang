@@ -15,8 +15,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-var db *sql.DB
-
 // Структура для обработки запроса на авторизацию
 type Credentials struct {
 	Username string `json:"username"`
@@ -33,7 +31,17 @@ type UserInfo struct {
 	Department string `json:"department"`
 }
 
+type ConfigDB struct {
+	User     string `json:"user"`
+	Password string `json:"password"`
+	DBName   string `json:"dbname"`
+	Host     string `json:"dbhost"`
+	Port     int    `json:"dbport"`
+}
+
 var jwtKey = []byte("secret_key") // Секретный ключ для подписи токенов
+
+var db *sql.DB
 
 // Инициализация подключения к базе данных
 func init() {
@@ -69,25 +77,6 @@ func generateJWT(username string, firstname string, department string) (string, 
 	return token.SignedString(jwtKey)
 }
 
-// func getUserInfo(id int) (UserInfo, error) {
-// 	rows, err := db.Query("SELECT first_name, departament FROM corporation_portal.workers WHERE id = $1", id)
-// 	if err != nil {
-// 		fmt.Println(rows)
-// 		return UserInfo{}, err
-// 	}
-// 	defer rows.Close()
-
-// 	// Преобразование данных
-// 	userInfo := UserInfo{}
-// 	err = rows.Scan(&userInfo.FirstName)
-// 	if err != nil {
-// 		// Обработка ошибки
-// 		return userInfo, err
-// 	}
-
-// 	return userInfo, nil
-// }
-
 func getUserInfo(login string) (UserInfo, error) {
 	rows, err := db.Query("SELECT first_name, departament FROM corporation_portal.workers WHERE email = $1 LIMIT 1", login)
 	if err != nil {
@@ -110,16 +99,6 @@ func getUserInfo(login string) (UserInfo, error) {
 
 	return userInfo, nil
 }
-
-// func getUserInfo(id int) (string, error) {
-// 	row := db.QueryRow("SELECT first_name FROM corporation_portal.workers WHERE id = $1", id)
-// 	var userName string
-// 	err := row.Scan(&userName)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	return userName, nil
-// }
 
 // Эндпоинт для авторизации
 func LoginHandler(c *gin.Context) {
