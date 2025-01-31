@@ -15,8 +15,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-var db *sql.DB
-
 // Структура для обработки запроса на авторизацию
 type Credentials struct {
 	Username string `json:"username"`
@@ -33,7 +31,17 @@ type UserInfo struct {
 	Department string `json:"department"`
 }
 
+type ConfigDB struct {
+	User     string `json:"user"`
+	Password string `json:"password"`
+	DBName   string `json:"dbname"`
+	Host     string `json:"dbhost"`
+	Port     int    `json:"dbport"`
+}
+
 var jwtKey = []byte("secret_key") // Секретный ключ для подписи токенов
+
+var db *sql.DB
 
 // Инициализация подключения к базе данных
 func init() {
