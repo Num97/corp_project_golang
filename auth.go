@@ -26,9 +26,23 @@ type LoginResponse struct {
 	Token string `json:"token"`
 }
 
+// type UserInfo struct {
+// 	FirstName  string `json:"firstname"`
+// 	Department string `json:"department"`
+// }
+
 type UserInfo struct {
-	FirstName  string `json:"firstname"`
-	Department string `json:"department"`
+	ID                 int
+	FirstName          sql.NullString
+	Surname            sql.NullString
+	SecondName         sql.NullString
+	Department         sql.NullString
+	Position           sql.NullString
+	OutsideNumber      sql.NullString
+	InsideNumber       sql.NullString
+	FirstMobileNumber  sql.NullString
+	SecondMobileNumber sql.NullString
+	Email              sql.NullString
 }
 
 type ConfigDB struct {
@@ -67,34 +81,79 @@ func init() {
 }
 
 // Функция генерации JWT
-func generateJWT(username string, firstname string, department string) (string, error) {
+// func generateJWT(username string, firstname string, department string) (string, error) {
+// 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+// 		"username":   username,
+// 		"firstname":  firstname,
+// 		"department": department,
+// 		"exp":        time.Now().Add(24 * time.Hour).Unix(), // Токен действует 24 часа
+// 	})
+// 	return token.SignedString(jwtKey)
+// }
+
+func generateJWT(user UserInfo) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username":   username,
-		"firstname":  firstname,
-		"department": department,
-		"exp":        time.Now().Add(24 * time.Hour).Unix(), // Токен действует 24 часа
+		"id":                   user.ID,
+		"username":             user.Email.String,
+		"firstname":            user.FirstName.String,
+		"surname":              user.Surname.String,
+		"secondname":           user.SecondName.String,
+		"department":           user.Department.String,
+		"position":             user.Position.String,
+		"outside_number":       user.OutsideNumber.String,
+		"inside_number":        user.InsideNumber.String,
+		"first_mobile_number":  user.FirstMobileNumber.String,
+		"second_mobile_number": user.SecondMobileNumber.String,
+		"email":                user.Email.String,
+		"exp":                  time.Now().Add(24 * time.Hour).Unix(), // Токен действует 24 часа
 	})
 	return token.SignedString(jwtKey)
 }
 
+// func getUserInfo(login string) (UserInfo, error) {
+// 	rows, err := db.Query("SELECT first_name, departament FROM corporation_portal.workers WHERE email = $1 LIMIT 1", login)
+// 	if err != nil {
+// 		return UserInfo{}, err
+// 	}
+// 	defer rows.Close()
+
+// 	// Проверка наличия результатов
+// 	if !rows.Next() {
+// 		// Обработка случая, когда результатов нет
+// 		return UserInfo{}, fmt.Errorf("no results found for user %s", login)
+// 	}
+
+// 	userInfo := UserInfo{}
+// 	err = rows.Scan(&userInfo.FirstName, &userInfo.Department)
+// 	if err != nil {
+// 		// Обработка ошибки
+// 		return userInfo, err
+// 	}
+
+// 	return userInfo, nil
+// }
+
 func getUserInfo(login string) (UserInfo, error) {
-	rows, err := db.Query("SELECT first_name, departament FROM corporation_portal.workers WHERE email = $1 LIMIT 1", login)
+	fmt.Println(login)
+	var userInfo UserInfo
+
+	query := `
+		SELECT id, first_name, surname, second_name, departament, position, 
+		       outside_number, inside_number, first_mobile_number, second_mobile_number, email 
+		FROM corporation_portal.workers 
+		WHERE email = $1 LIMIT 1`
+
+	err := db.QueryRow(query, login).Scan(
+		&userInfo.ID, &userInfo.FirstName, &userInfo.Surname, &userInfo.SecondName,
+		&userInfo.Department, &userInfo.Position, &userInfo.OutsideNumber,
+		&userInfo.InsideNumber, &userInfo.FirstMobileNumber, &userInfo.SecondMobileNumber, &userInfo.Email,
+	)
+
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return UserInfo{}, fmt.Errorf("user not found")
+		}
 		return UserInfo{}, err
-	}
-	defer rows.Close()
-
-	// Проверка наличия результатов
-	if !rows.Next() {
-		// Обработка случая, когда результатов нет
-		return UserInfo{}, fmt.Errorf("no results found for user %s", login)
-	}
-
-	userInfo := UserInfo{}
-	err = rows.Scan(&userInfo.FirstName, &userInfo.Department)
-	if err != nil {
-		// Обработка ошибки
-		return userInfo, err
 	}
 
 	return userInfo, nil
@@ -135,7 +194,8 @@ func LoginHandler(c *gin.Context) {
 	}
 
 	// Генерация JWT токена
-	token, err := generateJWT(creds.Username, userinfo.FirstName, userinfo.Department)
+	// token, err := generateJWT(creds.Username, userinfo.FirstName, userinfo.Department)
+	token, err := generateJWT(userinfo)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate token"})
 		return

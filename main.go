@@ -75,51 +75,6 @@ func GetOrInsertUser(db *sql.DB, login string) (AuthData, error) {
 	return AuthData{storedLogin, storedPassword, "Данные для авторизации"}, nil
 }
 
-// func SignupHandler(c *gin.Context) {
-// 	var request struct {
-// 		Login string `json:"login"`
-// 	}
-// 	if err := c.BindJSON(&request); err != nil {
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
-// 		return
-// 	}
-
-// 	authData, err := GetOrInsertUser(db, request.Login)
-// 	if err != nil {
-// 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-// 		return
-// 	}
-
-// 	c.JSON(http.StatusOK, authData)
-// }
-
-// func SignupHandler(c *gin.Context) {
-// 	var request struct {
-// 		Login string `json:"login"`
-// 	}
-// 	if err := c.BindJSON(&request); err != nil {
-// 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
-// 		return
-// 	}
-
-// 	authData, err := GetOrInsertUser(db, request.Login)
-// 	if err != nil {
-// 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-// 		return
-// 	}
-
-// 	// Отправка письма пользователю
-// 	mailer := NewMailer("smtp.example.com", "587", "your-email@example.com", "", false)
-// 	err = mailer.SendMail(request.Login, authData.Login, authData.Password)
-// 	if err != nil {
-// 		log.Printf("Ошибка отправки письма: %v", err)
-// 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось отправить письмо"})
-// 		return
-// 	}
-
-// 	c.JSON(http.StatusOK, authData)
-// }
-
 func SignupHandler(c *gin.Context) {
 	var request struct {
 		Login string `json:"login"`
