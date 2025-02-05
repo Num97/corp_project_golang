@@ -156,6 +156,136 @@ func CORSMiddleware() gin.HandlerFunc {
 	}
 }
 
+func UpdateDecisionToFalse(db *sql.DB, id int) error {
+	// SQL-запрос для обновления поля decision на false
+	query := `
+		UPDATE corporation_portal.edit_waiting_list
+		SET decision = 'false'
+		WHERE worker_id = $1 AND decision IS NULL;
+	`
+
+	// Выполнение запроса
+	_, err := db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("error updating decision: %v", err)
+	}
+
+	return nil
+}
+
+func InsertWaitingEditList(db *sql.DB, worker Worker) error {
+
+	er := UpdateDecisionToFalse(db, worker.ID)
+	if er != nil {
+		log.Fatalf("Failed to update decision: %v", er)
+	}
+
+	query := `INSERT INTO corporation_portal.edit_waiting_list (
+        worker_id, position, surname, first_name, second_name, outside_number, inside_number, 
+        first_mobile_number, second_mobile_number, email, department)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);`
+
+	_, err := db.Exec(query,
+		worker.ID, nullOrString(worker.Position), nullOrString(worker.Surname),
+		nullOrString(worker.FirstName), nullOrString(worker.SecondName), nullOrString(worker.OutsideNumber),
+		nullOrString(worker.InsideNumber), nullOrString(worker.FirstMobileNumber),
+		nullOrString(worker.SecondMobileNumber), nullOrString(worker.Email), nullOrString(worker.Department))
+
+	return err
+}
+
+func nullOrString(value sql.NullString) interface{} {
+	if value.Valid {
+		return value.String
+	}
+	return nil
+}
+
+func WaitingEditListAddHandler(c *gin.Context) {
+	var worker Worker
+	if err := c.BindJSON(&worker); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	err := InsertWaitingEditList(db, worker)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert data"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Data added successfully"})
+}
+
+// ожидание модерации для пользователя
+func GetWaitingListUser(db *sql.DB, workerID int) (*Worker, error) {
+	// Запрос для извлечения данных
+	query := `
+		SELECT worker_id, position, surname, first_name, second_name, outside_number, inside_number, 
+		       first_mobile_number, second_mobile_number, email, department
+		FROM corporation_portal.edit_waiting_list
+		WHERE worker_id = $1 AND decision IS NULL;
+	`
+
+	// Выполнение запроса
+	row := db.QueryRow(query, workerID)
+
+	// Структура, куда будем сохранять результат
+	var result Worker
+
+	// Сканируем результат в структуру
+	err := row.Scan(
+		&result.ID,
+		&result.Position,
+		&result.Surname,
+		&result.FirstName,
+		&result.SecondName,
+		&result.OutsideNumber,
+		&result.InsideNumber,
+		&result.FirstMobileNumber,
+		&result.SecondMobileNumber,
+		&result.Email,
+		&result.Department,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Если записи нет в базе, возвращаем nil
+			return nil, nil
+		}
+		return nil, fmt.Errorf("error querying database: %v", err)
+	}
+
+	return &result, nil
+}
+
+func WaitingListUserGetHandler(c *gin.Context) {
+	// Получаем ID из URL-параметра
+	workerID := c.Param("id")
+
+	// Преобразуем ID в int
+	id, err := strconv.Atoi(workerID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	// Получаем данные из базы данных
+	workerData, err := GetWaitingListUser(db, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch data"})
+		return
+	}
+
+	if workerData == nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "No data found for the given ID"})
+		return
+	}
+
+	// Заворачиваем в массив, даже если это одна запись
+	c.JSON(http.StatusOK, []Worker{*workerData})
+}
+
 func main() {
 	// Чтение конфигурационного файла
 	configFile, err := os.Open("config.json")
@@ -178,7 +308,13 @@ func main() {
 	// Маршрут для авторизации
 	r.POST("/api/v1/login", LoginHandler)
 
+	// Маршрут для напоминания пароля
 	r.POST("/api/v1/signup", SignupHandler)
+
+	// Маршрут для добавления на модерацию
+	r.POST("/api/v1/waiting_edit_list_add", WaitingEditListAddHandler)
+
+	r.GET("/api/v1/waiting_list_user_get/:id", WaitingListUserGetHandler)
 
 	// Маршрут для workers
 	r.GET("/api/v1/workers", func(c *gin.Context) {
