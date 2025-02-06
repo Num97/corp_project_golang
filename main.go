@@ -217,73 +217,101 @@ func WaitingEditListAddHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Data added successfully"})
 }
 
-// ожидание модерации для пользователя
-func GetWaitingListUser(db *sql.DB, workerID int) (*Worker, error) {
+func GetWaitingListUser(db *sql.DB, workerID *int) ([]Worker, error) {
 	// Запрос для извлечения данных
 	query := `
 		SELECT worker_id, position, surname, first_name, second_name, outside_number, inside_number, 
 		       first_mobile_number, second_mobile_number, email, department
 		FROM corporation_portal.edit_waiting_list
-		WHERE worker_id = $1 AND decision IS NULL;
+		WHERE decision IS NULL
 	`
 
-	// Выполнение запроса
-	row := db.QueryRow(query, workerID)
-
-	// Структура, куда будем сохранять результат
-	var result Worker
-
-	// Сканируем результат в структуру
-	err := row.Scan(
-		&result.ID,
-		&result.Position,
-		&result.Surname,
-		&result.FirstName,
-		&result.SecondName,
-		&result.OutsideNumber,
-		&result.InsideNumber,
-		&result.FirstMobileNumber,
-		&result.SecondMobileNumber,
-		&result.Email,
-		&result.Department,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			// Если записи нет в базе, возвращаем nil
-			return nil, nil
-		}
-		return nil, fmt.Errorf("error querying database: %v", err)
+	// Добавляем условие для фильтрации по worker_id, если он передан
+	if workerID != nil {
+		query += " AND worker_id = $1"
 	}
 
-	return &result, nil
+	// Выполнение запроса
+	var rows *sql.Rows
+	var err error
+	if workerID != nil {
+		rows, err = db.Query(query, *workerID)
+	} else {
+		rows, err = db.Query(query)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("error querying database: %v", err)
+	}
+	defer rows.Close()
+
+	// Структура, куда будем сохранять результат
+	var workers []Worker
+
+	// Сканируем результат в структуру
+	for rows.Next() {
+		var worker Worker
+		err := rows.Scan(
+			&worker.ID,
+			&worker.Position,
+			&worker.Surname,
+			&worker.FirstName,
+			&worker.SecondName,
+			&worker.OutsideNumber,
+			&worker.InsideNumber,
+			&worker.FirstMobileNumber,
+			&worker.SecondMobileNumber,
+			&worker.Email,
+			&worker.Department,
+		)
+
+		if err != nil {
+			return nil, fmt.Errorf("error scanning rows: %v", err)
+		}
+
+		workers = append(workers, worker)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error with rows iteration: %v", err)
+	}
+
+	return workers, nil
 }
 
 func WaitingListUserGetHandler(c *gin.Context) {
-	// Получаем ID из URL-параметра
-	workerID := c.Param("id")
+	// Получаем ID из параметра пути или строки запроса
+	workerIDParam := c.Param("id")
+	if workerIDParam == "" {
+		workerIDParam = c.DefaultQuery("id", "")
+	}
 
-	// Преобразуем ID в int
-	id, err := strconv.Atoi(workerID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
-		return
+	var workerID *int
+
+	// Преобразуем ID в int, если он передан
+	if workerIDParam != "" {
+		id, err := strconv.Atoi(workerIDParam)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+			return
+		}
+		workerID = &id
 	}
 
 	// Получаем данные из базы данных
-	workerData, err := GetWaitingListUser(db, id)
+	workers, err := GetWaitingListUser(db, workerID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch data"})
 		return
 	}
 
-	if workerData == nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": "No data found for the given ID"})
+	if len(workers) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"message": "No data found"})
 		return
 	}
 
-	// Заворачиваем в массив, даже если это одна запись
-	c.JSON(http.StatusOK, []Worker{*workerData})
+	// Возвращаем данные
+	c.JSON(http.StatusOK, workers)
 }
 
 func main() {
@@ -314,7 +342,11 @@ func main() {
 	// Маршрут для добавления на модерацию
 	r.POST("/api/v1/waiting_edit_list_add", WaitingEditListAddHandler)
 
+	// Маршрут для получения модерации пользователя
 	r.GET("/api/v1/waiting_list_user_get/:id", WaitingListUserGetHandler)
+
+	// Маршрут для получения модерации всех пользователей
+	r.GET("/api/v1/waiting_list_user_get", WaitingListUserGetHandler)
 
 	// Маршрут для workers
 	r.GET("/api/v1/workers", func(c *gin.Context) {
