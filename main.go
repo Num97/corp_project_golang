@@ -173,6 +173,23 @@ func UpdateDecisionToFalse(db *sql.DB, id int) error {
 	return nil
 }
 
+func UpdateDecisionToTrue(db *sql.DB, id int) error {
+	// SQL-запрос для обновления поля decision на true
+	query := `
+		UPDATE corporation_portal.edit_waiting_list
+		SET decision = 'true'
+		WHERE worker_id = $1 AND decision IS NULL;
+	`
+
+	// Выполнение запроса
+	_, err := db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("error updating decision: %v", err)
+	}
+
+	return nil
+}
+
 func InsertWaitingEditList(db *sql.DB, worker Worker) error {
 
 	er := UpdateDecisionToFalse(db, worker.ID)
@@ -194,6 +211,27 @@ func InsertWaitingEditList(db *sql.DB, worker Worker) error {
 	return err
 }
 
+func AcceptWaitingEditList(db *sql.DB, worker Worker) error {
+
+	er := UpdateDecisionToTrue(db, worker.ID)
+	if er != nil {
+		log.Fatalf("Failed to update decision: %v", er)
+	}
+
+	query := `UPDATE corporation_portal.workers
+				SET departament=$1, "position"=$2, surname=$3, first_name=$4, second_name=$5, outside_number=$6, inside_number=$7,
+				first_mobile_number=$8, second_mobile_number=$9, email=$10
+				WHERE id=$11;`
+
+	_, err := db.Exec(query,
+		nullOrString(worker.Department), nullOrString(worker.Position), nullOrString(worker.Surname),
+		nullOrString(worker.FirstName), nullOrString(worker.SecondName), nullOrString(worker.OutsideNumber),
+		nullOrString(worker.InsideNumber), nullOrString(worker.FirstMobileNumber),
+		nullOrString(worker.SecondMobileNumber), nullOrString(worker.Email), worker.ID)
+
+	return err
+}
+
 func nullOrString(value sql.NullString) interface{} {
 	if value.Valid {
 		return value.String
@@ -209,6 +247,22 @@ func WaitingEditListAddHandler(c *gin.Context) {
 	}
 
 	err := InsertWaitingEditList(db, worker)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert data"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Data added successfully"})
+}
+
+func AcceptWaitingEditListAddHandler(c *gin.Context) {
+	var worker Worker
+	if err := c.BindJSON(&worker); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	err := AcceptWaitingEditList(db, worker)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert data"})
 		return
@@ -341,6 +395,9 @@ func main() {
 
 	// Маршрут для добавления на модерацию
 	r.POST("/api/v1/waiting_edit_list_add", WaitingEditListAddHandler)
+
+	// Маршрут для одобрения изменения пользователя
+	r.POST("/api/v1/waiting_edit_list_accept_user", AcceptWaitingEditListAddHandler)
 
 	// Маршрут для получения модерации пользователя
 	r.GET("/api/v1/waiting_list_user_get/:id", WaitingListUserGetHandler)
