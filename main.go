@@ -123,7 +123,7 @@ func get() []Worker {
 		log.Fatalf("error decoding config file: %v", err)
 	}
 
-	rows, err := db.Query("SELECT id, departament, position, surname, first_name, second_name, outside_number, inside_number, first_mobile_number, second_mobile_number, email FROM corporation_portal.workers;")
+	rows, err := db.Query("SELECT id, departament, position, surname, first_name, second_name, outside_number, inside_number, first_mobile_number, second_mobile_number, email FROM corporation_portal.workers WHERE active is true ORDER BY id;")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -179,6 +179,23 @@ func UpdateDecisionToTrue(db *sql.DB, id int) error {
 		UPDATE corporation_portal.edit_waiting_list
 		SET decision = 'true'
 		WHERE worker_id = $1 AND decision IS NULL;
+	`
+
+	// Выполнение запроса
+	_, err := db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("error updating decision: %v", err)
+	}
+
+	return nil
+}
+
+func DismissWorker(db *sql.DB, id int) error {
+	// SQL-запрос для обновления поля decision на false
+	query := `
+		UPDATE corporation_portal.workers
+		SET active = 'false'
+		WHERE id = $1;
 	`
 
 	// Выполнение запроса
@@ -263,6 +280,38 @@ func AcceptWaitingEditListAddHandler(c *gin.Context) {
 	}
 
 	err := AcceptWaitingEditList(db, worker)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert data"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Data added successfully"})
+}
+
+func RejectWaitingEditListAddHandler(c *gin.Context) {
+	var worker Worker
+	if err := c.BindJSON(&worker); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	err := UpdateDecisionToFalse(db, worker.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert data"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Data added successfully"})
+}
+
+func DismissWorkerHandler(c *gin.Context) {
+	var worker Worker
+	if err := c.BindJSON(&worker); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	err := DismissWorker(db, worker.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert data"})
 		return
@@ -398,6 +447,12 @@ func main() {
 
 	// Маршрут для одобрения изменения пользователя
 	r.POST("/api/v1/waiting_edit_list_accept_user", AcceptWaitingEditListAddHandler)
+
+	// Маршрут для одобрения изменения пользователя
+	r.POST("/api/v1/waiting_edit_list_reject_user", RejectWaitingEditListAddHandler)
+
+	// Маршрут для увольнения работника
+	r.POST("/api/v1/dismiss_worker", DismissWorkerHandler)
 
 	// Маршрут для получения модерации пользователя
 	r.GET("/api/v1/waiting_list_user_get/:id", WaitingListUserGetHandler)
