@@ -113,19 +113,22 @@ func SignupHandler(c *gin.Context) {
 func get() []Worker {
 	configFile, err := os.Open("config.json")
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Error opening config file: %v", err)
+		return nil
 	}
 	defer configFile.Close()
 
 	var config ConfigDB
 	err = json.NewDecoder(configFile).Decode(&config)
 	if err != nil {
-		log.Fatalf("error decoding config file: %v", err)
+		log.Printf("Error decoding config file: %v", err)
+		return nil
 	}
 
 	rows, err := db.Query("SELECT id, departament, position, surname, first_name, second_name, outside_number, inside_number, first_mobile_number, second_mobile_number, email FROM corporation_portal.workers WHERE active is true ORDER BY id;")
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Error querying database: %v", err)
+		return nil
 	}
 
 	var workers []Worker
@@ -133,7 +136,8 @@ func get() []Worker {
 		worker := Worker{}
 		err := rows.Scan(&worker.ID, &worker.Department, &worker.Position, &worker.Surname, &worker.FirstName, &worker.SecondName, &worker.OutsideNumber, &worker.InsideNumber, &worker.FirstMobileNumber, &worker.SecondMobileNumber, &worker.Email)
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("Error scanning row: %v", err)
+			continue
 		} else {
 			workers = append(workers, worker)
 		}
@@ -208,10 +212,10 @@ func DismissWorker(db *sql.DB, id int) error {
 }
 
 func InsertWaitingEditList(db *sql.DB, worker Worker) error {
-
 	er := UpdateDecisionToFalse(db, worker.ID)
 	if er != nil {
-		log.Fatalf("Failed to update decision: %v", er)
+		log.Printf("Failed to update decision: %v", er)
+		return fmt.Errorf("failed to update decision: %v", er)
 	}
 
 	query := `INSERT INTO corporation_portal.edit_waiting_list (
@@ -229,16 +233,16 @@ func InsertWaitingEditList(db *sql.DB, worker Worker) error {
 }
 
 func AcceptWaitingEditList(db *sql.DB, worker Worker) error {
-
 	er := UpdateDecisionToTrue(db, worker.ID)
 	if er != nil {
-		log.Fatalf("Failed to update decision: %v", er)
+		log.Printf("Failed to update decision: %v", er)
+		return fmt.Errorf("failed to update decision: %v", er)
 	}
 
 	query := `UPDATE corporation_portal.workers
-				SET departament=$1, "position"=$2, surname=$3, first_name=$4, second_name=$5, outside_number=$6, inside_number=$7,
-				first_mobile_number=$8, second_mobile_number=$9, email=$10
-				WHERE id=$11;`
+                SET departament=$1, "position"=$2, surname=$3, first_name=$4, second_name=$5, outside_number=$6, inside_number=$7,
+                first_mobile_number=$8, second_mobile_number=$9, email=$10
+                WHERE id=$11;`
 
 	_, err := db.Exec(query,
 		nullOrString(worker.Department), nullOrString(worker.Position), nullOrString(worker.Surname),
@@ -248,8 +252,6 @@ func AcceptWaitingEditList(db *sql.DB, worker Worker) error {
 
 	return err
 }
-
-// we are also here now
 
 func EditWorker(db *sql.DB, worker Worker) error {
 
@@ -266,8 +268,6 @@ func EditWorker(db *sql.DB, worker Worker) error {
 
 	return err
 }
-
-// end
 
 func nullOrString(value sql.NullString) interface{} {
 	if value.Valid {
@@ -308,7 +308,6 @@ func AcceptWaitingEditListAddHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Data added successfully"})
 }
 
-// we are here now
 func EditWorkerHandler(c *gin.Context) {
 	var worker Worker
 	if err := c.BindJSON(&worker); err != nil {
@@ -324,8 +323,6 @@ func EditWorkerHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Data added successfully"})
 }
-
-// end
 
 func RejectWaitingEditListAddHandler(c *gin.Context) {
 	var worker Worker

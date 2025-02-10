@@ -80,17 +80,6 @@ func init() {
 	}
 }
 
-// Функция генерации JWT
-// func generateJWT(username string, firstname string, department string) (string, error) {
-// 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-// 		"username":   username,
-// 		"firstname":  firstname,
-// 		"department": department,
-// 		"exp":        time.Now().Add(24 * time.Hour).Unix(), // Токен действует 24 часа
-// 	})
-// 	return token.SignedString(jwtKey)
-// }
-
 func generateJWT(user UserInfo) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":                   user.ID,
@@ -109,29 +98,6 @@ func generateJWT(user UserInfo) (string, error) {
 	})
 	return token.SignedString(jwtKey)
 }
-
-// func getUserInfo(login string) (UserInfo, error) {
-// 	rows, err := db.Query("SELECT first_name, departament FROM corporation_portal.workers WHERE email = $1 LIMIT 1", login)
-// 	if err != nil {
-// 		return UserInfo{}, err
-// 	}
-// 	defer rows.Close()
-
-// 	// Проверка наличия результатов
-// 	if !rows.Next() {
-// 		// Обработка случая, когда результатов нет
-// 		return UserInfo{}, fmt.Errorf("no results found for user %s", login)
-// 	}
-
-// 	userInfo := UserInfo{}
-// 	err = rows.Scan(&userInfo.FirstName, &userInfo.Department)
-// 	if err != nil {
-// 		// Обработка ошибки
-// 		return userInfo, err
-// 	}
-
-// 	return userInfo, nil
-// }
 
 func getUserInfo(login string) (UserInfo, error) {
 	fmt.Println(login)
