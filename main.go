@@ -249,6 +249,26 @@ func AcceptWaitingEditList(db *sql.DB, worker Worker) error {
 	return err
 }
 
+// we are also here now
+
+func EditWorker(db *sql.DB, worker Worker) error {
+
+	query := `UPDATE corporation_portal.workers
+				SET departament=$1, "position"=$2, surname=$3, first_name=$4, second_name=$5, outside_number=$6, inside_number=$7,
+				first_mobile_number=$8, second_mobile_number=$9, email=$10
+				WHERE id=$11;`
+
+	_, err := db.Exec(query,
+		nullOrString(worker.Department), nullOrString(worker.Position), nullOrString(worker.Surname),
+		nullOrString(worker.FirstName), nullOrString(worker.SecondName), nullOrString(worker.OutsideNumber),
+		nullOrString(worker.InsideNumber), nullOrString(worker.FirstMobileNumber),
+		nullOrString(worker.SecondMobileNumber), nullOrString(worker.Email), worker.ID)
+
+	return err
+}
+
+// end
+
 func nullOrString(value sql.NullString) interface{} {
 	if value.Valid {
 		return value.String
@@ -287,6 +307,25 @@ func AcceptWaitingEditListAddHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Data added successfully"})
 }
+
+// we are here now
+func EditWorkerHandler(c *gin.Context) {
+	var worker Worker
+	if err := c.BindJSON(&worker); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	err := EditWorker(db, worker)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert data"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Data added successfully"})
+}
+
+// end
 
 func RejectWaitingEditListAddHandler(c *gin.Context) {
 	var worker Worker
@@ -447,6 +486,9 @@ func main() {
 
 	// Маршрут для одобрения изменения пользователя
 	r.POST("/api/v1/waiting_edit_list_accept_user", AcceptWaitingEditListAddHandler)
+
+	// Маршрут для изменения данных работника
+	r.POST("/api/v1/edit_worker", EditWorkerHandler)
 
 	// Маршрут для одобрения изменения пользователя
 	r.POST("/api/v1/waiting_edit_list_reject_user", RejectWaitingEditListAddHandler)
