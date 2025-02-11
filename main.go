@@ -116,7 +116,42 @@ func SignupHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, authData)
 }
 
-func get() []Worker {
+// func get() []Worker {
+// 	configFile, err := os.Open("config.json")
+// 	if err != nil {
+// 		log.Printf("Error opening config file: %v", err)
+// 		return nil
+// 	}
+// 	defer configFile.Close()
+
+// 	var config ConfigDB
+// 	err = json.NewDecoder(configFile).Decode(&config)
+// 	if err != nil {
+// 		log.Printf("Error decoding config file: %v", err)
+// 		return nil
+// 	}
+
+// 	rows, err := db.Query("SELECT id, departament, position, surname, first_name, second_name, outside_number, inside_number, first_mobile_number, second_mobile_number, email FROM corporation_portal.workers WHERE active is true ORDER BY id;")
+// 	if err != nil {
+// 		log.Printf("Error querying database: %v", err)
+// 		return nil
+// 	}
+
+// 	var workers []Worker
+// 	for rows.Next() {
+// 		worker := Worker{}
+// 		err := rows.Scan(&worker.ID, &worker.Department, &worker.Position, &worker.Surname, &worker.FirstName, &worker.SecondName, &worker.OutsideNumber, &worker.InsideNumber, &worker.FirstMobileNumber, &worker.SecondMobileNumber, &worker.Email)
+// 		if err != nil {
+// 			log.Printf("Error scanning row: %v", err)
+// 			continue
+// 		} else {
+// 			workers = append(workers, worker)
+// 		}
+// 	}
+// 	return workers
+// }
+
+func get(id int) []Worker {
 	configFile, err := os.Open("config.json")
 	if err != nil {
 		log.Printf("Error opening config file: %v", err)
@@ -131,11 +166,24 @@ func get() []Worker {
 		return nil
 	}
 
-	rows, err := db.Query("SELECT id, departament, position, surname, first_name, second_name, outside_number, inside_number, first_mobile_number, second_mobile_number, email FROM corporation_portal.workers WHERE active is true ORDER BY id;")
+	// Формируем SQL-запрос в зависимости от наличия id
+	query := "SELECT id, departament, position, surname, first_name, second_name, outside_number, inside_number, first_mobile_number, second_mobile_number, email FROM corporation_portal.workers WHERE active is true"
+	if id != 0 {
+		query += " AND id = $1"
+	}
+	query += " ORDER BY id;"
+
+	var rows *sql.Rows
+	if id != 0 {
+		rows, err = db.Query(query, id)
+	} else {
+		rows, err = db.Query(query)
+	}
 	if err != nil {
 		log.Printf("Error querying database: %v", err)
 		return nil
 	}
+	defer rows.Close()
 
 	var workers []Worker
 	for rows.Next() {
@@ -144,10 +192,10 @@ func get() []Worker {
 		if err != nil {
 			log.Printf("Error scanning row: %v", err)
 			continue
-		} else {
-			workers = append(workers, worker)
 		}
+		workers = append(workers, worker)
 	}
+
 	return workers
 }
 
@@ -692,6 +740,28 @@ func clearFilesByWorkerId(directory, workerId string) (bool, error) {
 	return deleted, nil
 }
 
+func onlyOneWorkerHandler(c *gin.Context) {
+	// Получаем id из query-параметров
+	idStr := c.Query("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+
+	// Получаем данные о работнике
+	workerData := get(id)
+	if len(workerData) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Worker not found"})
+		return
+	}
+
+	// Возвращаем данные
+	c.Header("Content-Type", "application/json")
+	c.Header("Access-Control-Allow-Origin", "*")
+	c.JSON(http.StatusOK, workerData) // Возвращаем первого работника (единственного)
+}
+
 func main() {
 	// Чтение конфигурационного файла
 	configFile, err := os.Open("config.json")
@@ -750,9 +820,13 @@ func main() {
 	// Маршрут для получения модерации всех пользователей
 	r.GET("/api/v1/waiting_list_user_get", WaitingListUserGetHandler)
 
+	// Маршрут только для одного работника
+
+	r.GET("/api/v1/worker", onlyOneWorkerHandler)
+
 	// Маршрут для workers
 	r.GET("/api/v1/workers", func(c *gin.Context) {
-		jsonData := get()
+		jsonData := get(0)
 		c.Header("Content-Type", "application/json")
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.JSON(http.StatusOK, jsonData)
