@@ -4,16 +4,22 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 )
+
+const moderationDir = "./moderation"
+const photoDir = "./photo"
 
 type Config struct {
 	Host string `json:"host"`
@@ -453,6 +459,239 @@ func WaitingListUserGetHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, workers)
 }
 
+// uploadImageModeration загружает изображение в moderationDir и предварительно чистит его
+func uploadImageModeration(c *gin.Context) {
+	uploadImage(c, moderationDir, true, false) // Чистим только moderationDir перед загрузкой
+}
+
+// uploadImagePhoto загружает изображение в photoDir, предварительно чистя и его, и moderationDir
+func uploadImagePhoto(c *gin.Context) {
+	uploadImage(c, photoDir, true, true) // Чистим photoDir перед загрузкой, затем moderationDir после
+}
+
+// Основная логика загрузки файлов
+func uploadImage(c *gin.Context, targetDir string, clearTarget bool, clearModerationAfter bool) {
+	workerId := c.PostForm("id")
+	if workerId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Worker ID is required"})
+		return
+	}
+
+	file, handler, err := c.Request.FormFile("image")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to get file from form"})
+		return
+	}
+	defer file.Close()
+
+	// Очищаем целевую папку, если требуется
+	if clearTarget {
+		err = clearOldFiles(targetDir, workerId)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to clear target directory: %v", err)})
+			return
+		}
+	}
+
+	// Генерируем путь файла
+	fileExt := filepath.Ext(handler.Filename)
+	newFileName := workerId + fileExt
+	filePath := filepath.Join(targetDir, newFileName)
+
+	// Создаем новый файл
+	out, err := os.Create(filePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to create file: %v", err)})
+		return
+	}
+	defer out.Close()
+
+	// Копируем содержимое
+	_, err = io.Copy(out, file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Unable to save file: %v", err)})
+		return
+	}
+
+	// Если нужно, очищаем moderationDir после загрузки в photoDir
+	if clearModerationAfter {
+		err = clearOldFiles(moderationDir, workerId)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to clear moderation directory: %v", err)})
+			return
+		}
+	}
+
+	// Успешный ответ
+	c.JSON(http.StatusOK, gin.H{"message": "File uploaded successfully", "file": newFileName})
+}
+
+// clearOldFiles удаляет файлы с указанным workerId в заданной директории
+func clearOldFiles(directory, workerId string) error {
+	files, err := os.ReadDir(directory)
+	if err != nil {
+		return fmt.Errorf("failed to read directory %s: %v", directory, err)
+	}
+
+	for _, file := range files {
+		if strings.HasPrefix(file.Name(), workerId) {
+			filePath := filepath.Join(directory, file.Name())
+			err := os.Remove(filePath)
+			if err != nil {
+				return fmt.Errorf("failed to delete file %s: %v", file.Name(), err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func getImageFromFolder(folder string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		workerId := c.Query("id")
+		if workerId == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Worker ID is required"})
+			return
+		}
+
+		// Ищем файл с нужным workerId
+		files, err := os.ReadDir(folder)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read directory"})
+			return
+		}
+
+		for _, file := range files {
+			if strings.HasPrefix(file.Name(), workerId) {
+				filePath := filepath.Join(folder, file.Name())
+				c.File(filePath) // Отправляем файл
+				return
+			}
+		}
+
+		// Если файл не найден
+		c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
+	}
+}
+
+func acceptImage(c *gin.Context) {
+	workerId := c.Query("id")
+	if workerId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Worker ID is required"})
+		return
+	}
+
+	// Ищем файл в moderationDir
+	filePath, err := findFileByWorkerId(moderationDir, workerId)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found in moderationDir"})
+		return
+	}
+
+	// Очищаем только файлы с этим workerId в photoDir перед копированием
+	_, err = clearFilesByWorkerId(photoDir, workerId)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear files in photoDir"})
+		return
+	}
+
+	// Определяем новый путь в photoDir
+	newFilePath := filepath.Join(photoDir, filepath.Base(filePath))
+
+	// Копируем файл
+	err = copyFile(filePath, newFilePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to copy file to photoDir"})
+		return
+	}
+
+	// Удаляем только файлы с этим workerId в moderationDir
+	_, err = clearFilesByWorkerId(moderationDir, workerId)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file from moderationDir"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Image accepted successfully", "file": filepath.Base(filePath)})
+}
+
+// findFileByWorkerId ищет файл в папке по workerId
+func findFileByWorkerId(directory, workerId string) (string, error) {
+	files, err := os.ReadDir(directory)
+	if err != nil {
+		return "", err
+	}
+
+	for _, file := range files {
+		if strings.HasPrefix(file.Name(), workerId) {
+			return filepath.Join(directory, file.Name()), nil
+		}
+	}
+
+	return "", fmt.Errorf("file not found")
+}
+
+// copyFile копирует файл из source в destination
+func copyFile(source, destination string) error {
+	srcFile, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(destination)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	return err
+}
+
+// reject image
+func rejectImage(c *gin.Context) {
+	workerId := c.Query("id")
+	if workerId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Worker ID is required"})
+		return
+	}
+
+	// Удаляем файлы с workerId в moderationDir
+	deleted, err := clearFilesByWorkerId(moderationDir, workerId)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to delete files: %v", err)})
+		return
+	}
+
+	if deleted {
+		c.JSON(http.StatusOK, gin.H{"message": "Image rejected and deleted successfully"})
+	} else {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No files found for this workerId"})
+	}
+}
+
+// clearFilesByWorkerId удаляет файлы в указанной директории, которые начинаются с workerId
+func clearFilesByWorkerId(directory, workerId string) (bool, error) {
+	files, err := os.ReadDir(directory)
+	if err != nil {
+		return false, fmt.Errorf("failed to read directory: %v", err)
+	}
+
+	deleted := false
+	for _, file := range files {
+		if strings.HasPrefix(file.Name(), workerId) {
+			err := os.Remove(filepath.Join(directory, file.Name()))
+			if err != nil {
+				return false, fmt.Errorf("failed to delete file %s: %v", file.Name(), err)
+			}
+			deleted = true
+		}
+	}
+
+	return deleted, nil
+}
+
 func main() {
 	// Чтение конфигурационного файла
 	configFile, err := os.Open("config.json")
@@ -492,6 +731,18 @@ func main() {
 
 	// Маршрут для увольнения работника
 	r.POST("/api/v1/dismiss_worker", DismissWorkerHandler)
+
+	r.POST("/api/v1/upload_image_moderation", uploadImageModeration)
+
+	r.POST("/api/v1/upload_image_photo", uploadImagePhoto)
+
+	r.GET("/api/v1/get_image_moderation", getImageFromFolder(moderationDir))
+
+	r.GET("/api/v1/get_image_photo", getImageFromFolder(photoDir))
+
+	r.POST("/api/v1/accept_image", acceptImage)
+
+	r.POST("/api/v1/reject_image", rejectImage)
 
 	// Маршрут для получения модерации пользователя
 	r.GET("/api/v1/waiting_list_user_get/:id", WaitingListUserGetHandler)
