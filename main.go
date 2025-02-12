@@ -517,6 +517,11 @@ func uploadImagePhoto(c *gin.Context) {
 	uploadImage(c, photoDir, true, true) // Чистим photoDir перед загрузкой, затем moderationDir после
 }
 
+// uploadImagePhoto загружает изображение в photoDir, предварительно чистя и его
+func uploadImagePhotoDirectly(c *gin.Context) {
+	uploadImage(c, photoDir, true, false) // Чистим photoDir перед загрузкой
+}
+
 // Основная логика загрузки файлов
 func uploadImage(c *gin.Context, targetDir string, clearTarget bool, clearModerationAfter bool) {
 	workerId := c.PostForm("id")
@@ -609,10 +614,20 @@ func getImageFromFolder(folder string) gin.HandlerFunc {
 			return
 		}
 
+		// for _, file := range files {
+		// 	if strings.HasPrefix(file.Name(), workerId) {
+		// 		filePath := filepath.Join(folder, file.Name())
+		// 		c.File(filePath) // Отправляем файл
+		// 		return
+		// 	}
+		// }
+
 		for _, file := range files {
-			if strings.HasPrefix(file.Name(), workerId) {
-				filePath := filepath.Join(folder, file.Name())
-				c.File(filePath) // Отправляем файл
+			fileName := file.Name()
+			fileBaseName := strings.TrimSuffix(fileName, filepath.Ext(fileName)) // Убираем расширение
+			if fileBaseName == workerId {
+				filePath := filepath.Join(folder, fileName)
+				c.File(filePath)
 				return
 			}
 		}
@@ -805,6 +820,8 @@ func main() {
 	r.POST("/api/v1/upload_image_moderation", uploadImageModeration)
 
 	r.POST("/api/v1/upload_image_photo", uploadImagePhoto)
+
+	r.POST("/api/v1/upload_image_photo_directly", uploadImagePhotoDirectly)
 
 	r.GET("/api/v1/get_image_moderation", getImageFromFolder(moderationDir))
 
