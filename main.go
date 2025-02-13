@@ -46,6 +46,11 @@ type AuthData struct {
 	Message  string
 }
 
+type Department struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
 // GenerateRandomPassword создает случайный пароль длиной 10 символов
 func GenerateRandomPassword(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -115,41 +120,6 @@ func SignupHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, authData)
 }
-
-// func get() []Worker {
-// 	configFile, err := os.Open("config.json")
-// 	if err != nil {
-// 		log.Printf("Error opening config file: %v", err)
-// 		return nil
-// 	}
-// 	defer configFile.Close()
-
-// 	var config ConfigDB
-// 	err = json.NewDecoder(configFile).Decode(&config)
-// 	if err != nil {
-// 		log.Printf("Error decoding config file: %v", err)
-// 		return nil
-// 	}
-
-// 	rows, err := db.Query("SELECT id, departament, position, surname, first_name, second_name, outside_number, inside_number, first_mobile_number, second_mobile_number, email FROM corporation_portal.workers WHERE active is true ORDER BY id;")
-// 	if err != nil {
-// 		log.Printf("Error querying database: %v", err)
-// 		return nil
-// 	}
-
-// 	var workers []Worker
-// 	for rows.Next() {
-// 		worker := Worker{}
-// 		err := rows.Scan(&worker.ID, &worker.Department, &worker.Position, &worker.Surname, &worker.FirstName, &worker.SecondName, &worker.OutsideNumber, &worker.InsideNumber, &worker.FirstMobileNumber, &worker.SecondMobileNumber, &worker.Email)
-// 		if err != nil {
-// 			log.Printf("Error scanning row: %v", err)
-// 			continue
-// 		} else {
-// 			workers = append(workers, worker)
-// 		}
-// 	}
-// 	return workers
-// }
 
 func get(id int) []Worker {
 	configFile, err := os.Open("config.json")
@@ -579,7 +549,6 @@ func uploadImage(c *gin.Context, targetDir string, clearTarget bool, clearModera
 	c.JSON(http.StatusOK, gin.H{"message": "File uploaded successfully", "file": newFileName})
 }
 
-// clearOldFiles удаляет файлы с указанным workerId в заданной директории
 func clearOldFiles(directory, workerId string) error {
 	files, err := os.ReadDir(directory)
 	if err != nil {
@@ -587,11 +556,12 @@ func clearOldFiles(directory, workerId string) error {
 	}
 
 	for _, file := range files {
-		if strings.HasPrefix(file.Name(), workerId) {
-			filePath := filepath.Join(directory, file.Name())
-			err := os.Remove(filePath)
-			if err != nil {
-				return fmt.Errorf("failed to delete file %s: %v", file.Name(), err)
+		name := file.Name()
+		baseName := strings.TrimSuffix(name, filepath.Ext(name)) // Убираем расширение
+		if baseName == workerId {                                // Сравниваем только имя без расширения
+			filePath := filepath.Join(directory, name)
+			if err := os.Remove(filePath); err != nil {
+				return fmt.Errorf("failed to delete file %s: %v", name, err)
 			}
 		}
 	}
@@ -734,7 +704,6 @@ func rejectImage(c *gin.Context) {
 	}
 }
 
-// clearFilesByWorkerId удаляет файлы в указанной директории, которые начинаются с workerId
 func clearFilesByWorkerId(directory, workerId string) (bool, error) {
 	files, err := os.ReadDir(directory)
 	if err != nil {
@@ -775,6 +744,81 @@ func onlyOneWorkerHandler(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
 	c.Header("Access-Control-Allow-Origin", "*")
 	c.JSON(http.StatusOK, workerData) // Возвращаем первого работника (единственного)
+}
+
+func getDepartments(db *sql.DB) ([]Department, error) {
+	rows, err := db.Query("SELECT id, department FROM corporation_portal.departments;")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var departments []Department
+	for rows.Next() {
+		var d Department
+		if err := rows.Scan(&d.ID, &d.Name); err != nil {
+			return nil, err
+		}
+		departments = append(departments, d)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return departments, nil
+}
+
+func departmentsHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		departments, err := getDepartments(db)
+		if err != nil {
+			log.Println("Ошибка получения отделов:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Не удалось получить отделы"})
+			return
+		}
+		c.JSON(http.StatusOK, departments)
+	}
+}
+
+func addWorker(c *gin.Context) {
+	var worker Worker
+
+	// Декодируем JSON
+	if err := c.ShouldBindJSON(&worker); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	// SQL-запрос для вставки
+	query := `
+		INSERT INTO corporation_portal.workers (
+			departament, "position", surname, first_name, second_name, 
+			outside_number, inside_number, first_mobile_number, second_mobile_number, email, active
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true) RETURNING id
+	`
+
+	var workerID int
+	err := db.QueryRow(query,
+		nullOrString(worker.Department),
+		nullOrString(worker.Position),
+		nullOrString(worker.Surname),
+		nullOrString(worker.FirstName),
+		nullOrString(worker.SecondName),
+		nullOrString(worker.OutsideNumber),
+		nullOrString(worker.InsideNumber),
+		nullOrString(worker.FirstMobileNumber),
+		nullOrString(worker.SecondMobileNumber),
+		nullOrString(worker.Email),
+	).Scan(&workerID)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to insert worker: %v", err)})
+		return
+	}
+
+	// Отправляем ID на фронт
+	c.JSON(http.StatusOK, gin.H{"workerId": workerID})
 }
 
 func main() {
@@ -837,8 +881,11 @@ func main() {
 	// Маршрут для получения модерации всех пользователей
 	r.GET("/api/v1/waiting_list_user_get", WaitingListUserGetHandler)
 
-	// Маршрут только для одного работника
+	r.GET("/api/v1/departments", departmentsHandler(db))
 
+	r.POST("/api/v1/add_worker", addWorker)
+
+	// Маршрут только для одного работника
 	r.GET("/api/v1/worker", onlyOneWorkerHandler)
 
 	// Маршрут для workers
