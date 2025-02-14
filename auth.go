@@ -26,11 +26,6 @@ type LoginResponse struct {
 	Token string `json:"token"`
 }
 
-// type UserInfo struct {
-// 	FirstName  string `json:"firstname"`
-// 	Department string `json:"department"`
-// }
-
 type UserInfo struct {
 	ID                 int
 	FirstName          sql.NullString

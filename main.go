@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 )
@@ -62,28 +64,86 @@ func GenerateRandomPassword(length int) string {
 	return string(password)
 }
 
-// GetOrInsertUser ищет пользователя по login, а если не находит, то добавляет нового
+// func GetOrInsertUser(db *sql.DB, login string) (AuthData, error) {
+// 	var storedLogin, storedPassword string
+
+// 	// Проверяем, есть ли пользователь в таблице users
+// 	query := "SELECT login, password FROM corporation_portal.users WHERE login = $1"
+// 	err := db.QueryRow(query, login).Scan(&storedLogin, &storedPassword)
+// 	if err == nil {
+// 		return AuthData{storedLogin, storedPassword, "Напоминание пароля"}, nil // Пользователь уже есть
+// 	} else if err != sql.ErrNoRows {
+// 		return AuthData{}, fmt.Errorf("ошибка при запросе к БД: %v", err)
+// 	}
+
+// 	// Проверяем, есть ли email в списке активных работников
+// 	var foundEmail string
+// 	checkEmailQuery := `
+// 		SELECT DISTINCT email
+// 		FROM corporation_portal.workers
+// 		WHERE active IS TRUE AND email = $1;
+// 	`
+// 	err = db.QueryRow(checkEmailQuery, login).Scan(&foundEmail)
+// 	if err == sql.ErrNoRows {
+// 		return AuthData{}, fmt.Errorf("пользователь не найден") // Email отсутствует среди активных работников
+// 	} else if err != nil {
+// 		return AuthData{}, fmt.Errorf("ошибка при проверке email: %v", err)
+// 	}
+
+// 	// Генерируем новый пароль и создаем пользователя
+// 	newPassword := GenerateRandomPassword(10)
+// 	insertQuery := "INSERT INTO corporation_portal.users (login, password) VALUES ($1, $2) RETURNING login, password"
+// 	err = db.QueryRow(insertQuery, login, newPassword).Scan(&storedLogin, &storedPassword)
+// 	if err != nil {
+// 		return AuthData{}, fmt.Errorf("ошибка при вставке нового пользователя: %v", err)
+// 	}
+
+// 	return AuthData{storedLogin, storedPassword, "Данные для авторизации"}, nil
+// }
+
 func GetOrInsertUser(db *sql.DB, login string) (AuthData, error) {
 	var storedLogin, storedPassword string
 
-	// Проверяем, есть ли такой пользователь
+	// Проверяем, есть ли пользователь в таблице users
 	query := "SELECT login, password FROM corporation_portal.users WHERE login = $1"
 	err := db.QueryRow(query, login).Scan(&storedLogin, &storedPassword)
 	if err == nil {
-		return AuthData{storedLogin, storedPassword, "Напоминание пароля"}, nil // Пользователь найден
+		return AuthData{storedLogin, storedPassword, "Напоминание пароля"}, nil // Пользователь уже есть
 	} else if err != sql.ErrNoRows {
 		return AuthData{}, fmt.Errorf("ошибка при запросе к БД: %v", err)
 	}
 
-	// Если пользователь не найден, создаем нового
+	// Проверяем, есть ли email в списке активных работников
+	var foundEmail string
+	checkEmailQuery := `
+		SELECT DISTINCT email 
+		FROM corporation_portal.workers 
+		WHERE active IS TRUE AND email = $1;
+	`
+	err = db.QueryRow(checkEmailQuery, login).Scan(&foundEmail)
+	if err == sql.ErrNoRows {
+		return AuthData{}, fmt.Errorf("пользователь не найден") // Email отсутствует среди активных работников
+	} else if err != nil {
+		return AuthData{}, fmt.Errorf("ошибка при проверке email: %v", err)
+	}
+
+	// Генерируем новый пароль
 	newPassword := GenerateRandomPassword(10)
+
+	// Хешируем пароль
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return AuthData{}, fmt.Errorf("ошибка при хешировании пароля: %v", err)
+	}
+
+	// Вставляем пользователя с хешированным паролем
 	insertQuery := "INSERT INTO corporation_portal.users (login, password) VALUES ($1, $2) RETURNING login, password"
-	err = db.QueryRow(insertQuery, login, newPassword).Scan(&storedLogin, &storedPassword)
+	err = db.QueryRow(insertQuery, login, string(hashedPassword)).Scan(&storedLogin, &storedPassword)
 	if err != nil {
 		return AuthData{}, fmt.Errorf("ошибка при вставке нового пользователя: %v", err)
 	}
 
-	return AuthData{storedLogin, storedPassword, "Данные для авторизации"}, nil
+	return AuthData{storedLogin, newPassword, "Данные для авторизации"}, nil
 }
 
 func SignupHandler(c *gin.Context) {
@@ -747,18 +807,26 @@ func onlyOneWorkerHandler(c *gin.Context) {
 }
 
 func getDepartments(db *sql.DB) ([]Department, error) {
-	rows, err := db.Query("SELECT id, department FROM corporation_portal.departments;")
+	rows, err := db.Query(`
+		SELECT DISTINCT departament 
+		FROM corporation_portal.workers 
+		WHERE active IS NOT FALSE AND departament IS NOT NULL;
+	`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	var departments []Department
+	id := 1 // Начинаем ID с 1 (можно с 0, если нужно)
+
 	for rows.Next() {
 		var d Department
-		if err := rows.Scan(&d.ID, &d.Name); err != nil {
+		if err := rows.Scan(&d.Name); err != nil {
 			return nil, err
 		}
+		d.ID = id // Назначаем ID вручную
+		id++
 		departments = append(departments, d)
 	}
 
