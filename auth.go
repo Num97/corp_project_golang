@@ -7,8 +7,9 @@ import (
 	"log"
 	"net/http"
 	"os"
-
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
@@ -48,7 +49,7 @@ type ConfigDB struct {
 	Port     int    `json:"dbport"`
 }
 
-var jwtKey = []byte("secret_key") // Секретный ключ для подписи токенов
+var jwtKey = []byte("DairyComp") // Секретный ключ для подписи токенов
 
 var db *sql.DB
 
@@ -89,7 +90,7 @@ func generateJWT(user UserInfo) (string, error) {
 		"first_mobile_number":  user.FirstMobileNumber.String,
 		"second_mobile_number": user.SecondMobileNumber.String,
 		"email":                user.Email.String,
-		"exp":                  time.Now().Add(24 * time.Hour).Unix(), // Токен действует 24 часа
+		"exp":                  time.Now().Add(8 * time.Hour).Unix(), // Токен действует 8 часов
 	})
 	return token.SignedString(jwtKey)
 }
@@ -128,9 +129,9 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	// Запрос к базе данных для получения пароля
-	var dbPassword string
-	err := db.QueryRow("SELECT password FROM corporation_portal.users WHERE login = $1", creds.Username).Scan(&dbPassword)
+	// Запрос к базе данных для получения хэшированного пароля
+	var hashedPassword string
+	err := db.QueryRow("SELECT password FROM corporation_portal.users WHERE login = $1", creds.Username).Scan(&hashedPassword)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// Если пользователь не найден
@@ -142,8 +143,9 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	// Сравнение введённого пароля с паролем из базы данных
-	if creds.Password != dbPassword {
+	// Сравнение введённого пароля с хэшем из базы данных
+	err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(creds.Password))
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}

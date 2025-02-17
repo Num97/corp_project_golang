@@ -64,67 +64,29 @@ func GenerateRandomPassword(length int) string {
 	return string(password)
 }
 
-// func GetOrInsertUser(db *sql.DB, login string) (AuthData, error) {
-// 	var storedLogin, storedPassword string
-
-// 	// Проверяем, есть ли пользователь в таблице users
-// 	query := "SELECT login, password FROM corporation_portal.users WHERE login = $1"
-// 	err := db.QueryRow(query, login).Scan(&storedLogin, &storedPassword)
-// 	if err == nil {
-// 		return AuthData{storedLogin, storedPassword, "Напоминание пароля"}, nil // Пользователь уже есть
-// 	} else if err != sql.ErrNoRows {
-// 		return AuthData{}, fmt.Errorf("ошибка при запросе к БД: %v", err)
-// 	}
-
-// 	// Проверяем, есть ли email в списке активных работников
-// 	var foundEmail string
-// 	checkEmailQuery := `
-// 		SELECT DISTINCT email
-// 		FROM corporation_portal.workers
-// 		WHERE active IS TRUE AND email = $1;
-// 	`
-// 	err = db.QueryRow(checkEmailQuery, login).Scan(&foundEmail)
-// 	if err == sql.ErrNoRows {
-// 		return AuthData{}, fmt.Errorf("пользователь не найден") // Email отсутствует среди активных работников
-// 	} else if err != nil {
-// 		return AuthData{}, fmt.Errorf("ошибка при проверке email: %v", err)
-// 	}
-
-// 	// Генерируем новый пароль и создаем пользователя
-// 	newPassword := GenerateRandomPassword(10)
-// 	insertQuery := "INSERT INTO corporation_portal.users (login, password) VALUES ($1, $2) RETURNING login, password"
-// 	err = db.QueryRow(insertQuery, login, newPassword).Scan(&storedLogin, &storedPassword)
-// 	if err != nil {
-// 		return AuthData{}, fmt.Errorf("ошибка при вставке нового пользователя: %v", err)
-// 	}
-
-// 	return AuthData{storedLogin, storedPassword, "Данные для авторизации"}, nil
-// }
-
 func GetOrInsertUser(db *sql.DB, login string) (AuthData, error) {
 	var storedLogin, storedPassword string
-
-	// Проверяем, есть ли пользователь в таблице users
-	query := "SELECT login, password FROM corporation_portal.users WHERE login = $1"
-	err := db.QueryRow(query, login).Scan(&storedLogin, &storedPassword)
-	if err == nil {
-		return AuthData{storedLogin, storedPassword, "Напоминание пароля"}, nil // Пользователь уже есть
-	} else if err != sql.ErrNoRows {
-		return AuthData{}, fmt.Errorf("ошибка при запросе к БД: %v", err)
-	}
-
-	// Проверяем, есть ли email в списке активных работников
 	var foundEmail string
+
+	// Запрос для проверки email среди активных работников
 	checkEmailQuery := `
-		SELECT DISTINCT email 
-		FROM corporation_portal.workers 
-		WHERE active IS TRUE AND email = $1;
+	SELECT email
+	FROM corporation_portal.workers 
+	WHERE active IS TRUE AND email = $1;
 	`
-	err = db.QueryRow(checkEmailQuery, login).Scan(&foundEmail)
+
+	// Выполняем запрос и проверяем наличие email среди активных работников
+	err := db.QueryRow(checkEmailQuery, login).Scan(&foundEmail)
 	if err == sql.ErrNoRows {
-		return AuthData{}, fmt.Errorf("пользователь не найден") // Email отсутствует среди активных работников
+		// Если email не найден среди активных работников
+		log.Printf("Пользователь с email %s не найден среди активных работников\n", login)
+		// Продолжаем выполнение программы, возвращаем пустую структуру
+		return AuthData{}, nil
 	} else if err != nil {
-		return AuthData{}, fmt.Errorf("ошибка при проверке email: %v", err)
+		// Обрабатываем другие ошибки при выполнении запроса
+		log.Printf("Ошибка при проверке email: %v\n", err)
+		// Продолжаем выполнение программы, возвращаем пустую структуру
+		return AuthData{}, nil
 	}
 
 	// Генерируем новый пароль
@@ -133,16 +95,22 @@ func GetOrInsertUser(db *sql.DB, login string) (AuthData, error) {
 	// Хешируем пароль
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
-		return AuthData{}, fmt.Errorf("ошибка при хешировании пароля: %v", err)
+		log.Printf("Ошибка при хешировании пароля: %v\n", err)
+		// Продолжаем выполнение программы, возвращаем пустую структуру
+		return AuthData{}, nil
 	}
 
 	// Вставляем пользователя с хешированным паролем
-	insertQuery := "INSERT INTO corporation_portal.users (login, password) VALUES ($1, $2) RETURNING login, password"
+	insertQuery := `INSERT INTO corporation_portal.users (login, password) VALUES ($1, $2) 
+					ON CONFLICT (login) DO UPDATE SET password=$2 RETURNING login, password;`
 	err = db.QueryRow(insertQuery, login, string(hashedPassword)).Scan(&storedLogin, &storedPassword)
 	if err != nil {
-		return AuthData{}, fmt.Errorf("ошибка при вставке нового пользователя: %v", err)
+		log.Printf("Ошибка при вставке нового пользователя: %v\n", err)
+		// Продолжаем выполнение программы, возвращаем пустую структуру
+		return AuthData{}, nil
 	}
 
+	// Возвращаем данные для авторизации
 	return AuthData{storedLogin, newPassword, "Данные для авторизации"}, nil
 }
 
