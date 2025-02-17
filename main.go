@@ -874,6 +874,15 @@ func main() {
 	// Создаём маршрутизатор gin
 	r := gin.Default()
 
+	r.Static("/assets", "./dist/assets")         // Для JS и CSS
+	r.Static("/images", "./dist/images")         // Для изображений
+	r.StaticFile("/vite.svg", "./dist/vite.svg") // Для отдельных файлов, например, SVG
+
+	// Обслуживание index.html для всех остальных запросов
+	r.NoRoute(func(c *gin.Context) {
+		c.File("./dist/index.html")
+	})
+
 	r.Use(CORSMiddleware())
 
 	// Маршрут для авторизации
