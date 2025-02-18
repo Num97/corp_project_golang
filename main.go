@@ -306,6 +306,7 @@ func AcceptWaitingEditList(db *sql.DB, worker Worker) error {
 }
 
 func EditWorker(db *sql.DB, worker Worker) error {
+	fmt.Println(worker)
 
 	query := `UPDATE corporation_portal.workers
 				SET departament=$1, "position"=$2, surname=$3, first_name=$4, second_name=$5, outside_number=$6, inside_number=$7,
@@ -322,10 +323,10 @@ func EditWorker(db *sql.DB, worker Worker) error {
 }
 
 func nullOrString(value sql.NullString) interface{} {
-	if value.Valid {
-		return value.String
+	if value.String == "" {
+		return nil
 	}
-	return nil
+	return value.String
 }
 
 func WaitingEditListAddHandler(c *gin.Context) {
